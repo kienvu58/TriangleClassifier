@@ -5,16 +5,12 @@ from numpy.linalg import norm
 import os
 import cPickle as pickle
 from sklearn import metrics
-import helper
-import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+import random
 
 import time
 
-SZ = 20  # size of each image is SZ x SZ
-TRAIN_DATA_PATH = "../data/train/"
-SUB_FOLDERS = ["non-triangle", "triangle"]
-DATA_FN = "images.dat"
+SZ = 20
 
 
 class StatModel(object):
@@ -26,6 +22,27 @@ class StatModel(object):
 
     def save(self, fn):
         self.model.save(fn)
+
+
+class ANN(StatModel):
+    def __init__(self, hidden=20):
+        super(ANN, self).__init__()
+        self.model = cv2.ml.ANN_MLP_create()
+        self.model.setTrainMethod(cv2.ml.ANN_MLP_RPROP)
+        self.model.setLayerSizes(np.array([400, hidden, 2]))
+        self.model.setActivationFunction(cv2.ml.ANN_MLP_SIGMOID_SYM)
+        self.model.setTermCriteria((cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 1))
+
+    def train(self, samples, responses):
+        self.model.train(samples, cv2.ml.ROW_SAMPLE, responses)
+
+    def predict(self, samples):
+        predicted_labels = []
+
+        for sample in samples:
+            predicted_label = self.model.predict(np.array([sample.ravel()], dtype=np.float32))[0]
+            predicted_labels.append(predicted_label)
+        return predicted_labels
 
 
 class SVM(StatModel):
@@ -86,7 +103,7 @@ def evaluate_model(model, samples, labels):
 
 
 def print_model_evaluation(confusion_matrix, score_metrics):
-    helper.print_cm(confusion_matrix, ["non-triangle", "triangle"])
+    print_cm(confusion_matrix, ["non-triangle", "triangle"])
     print "Mean Squared Error: %f" % score_metrics["mse"]
     print "Accuracy: %f" % score_metrics["accuracy"]
     print "Precision: %f" % score_metrics["precision"]
@@ -123,16 +140,6 @@ def load_pickle_data(filename):
     with open(filename, "rb") as f:
         images = pickle.load(f)
         labels = pickle.load(f)
-
-    return images, labels
-
-
-def load_data():
-    if not os.path.isfile(DATA_FN):
-        images, labels = load_raw_data(TRAIN_DATA_PATH, SUB_FOLDERS)
-        dump_data(images, labels, DATA_FN)
-    else:
-        images, labels = load_pickle_data(DATA_FN)
 
     return images, labels
 
@@ -193,6 +200,7 @@ def hog(img):
 
 class MidpointNormalize(Normalize):
     """Utility function to move the midpoint of a colormap to be around the values of interest."""
+
     def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
         self.midpoint = midpoint
         Normalize.__init__(self, vmin, vmax, clip)
@@ -211,148 +219,56 @@ class Timer:
         print message
 
     def stop(self):
-        print "finished in %0.3f s" % (time.time() - self.start_time)
+        print "[INFO] finished in %0.3fs" % (time.time() - self.start_time)
 
 
-def main():
-    timer = Timer()
-    timer.start("loading data...")
-    raw_images, labels = load_data()
-    timer.stop()
-
-    timer.start("preprocessing...")
-    images_1 = cv2.GaussianBlur(raw_images, (3, 3), 0)
-    _, images_2 = cv2.threshold(images_1, 50, 255, cv2.THRESH_TOZERO)
-    images_3 = cv2.medianBlur(images_2, 3)
-
-    # samples = extract_features_simple(images)
-    samples = extract_features(images_3)
-
-    # chunk data
-    n = 1000
-
-    data = zip(samples, labels)
-    triange_index = range(100300, 110300)
-    non_triange_index = range(100000)
-
-    trianges = np.random.choice(triange_index, n)
-    non_trianges = np.random.choice(non_triange_index, n)
-
-    triangles_sample, triangles_label = samples[trianges], labels[trianges]
-    non_triangles_sample, non_triangles_label = samples[non_trianges], labels[non_trianges]
-
-    balanced_samples = np.concatenate([triangles_sample, non_triangles_sample])
-    balanced_labels = np.concatenate([triangles_label, non_triangles_label])
-
-    # shuffle data
-    rand = np.random.RandomState(3426)
-    shuffle = rand.permutation(len(samples))
-    samples, labels = samples[shuffle], labels[shuffle]
-
-    images_1 = images_1[shuffle]
-    images_2 = images_2[shuffle]
-    images_3 = images_3[shuffle]
-    raw_images = raw_images[shuffle]
-
-    # split train, test
-    train_n = int(0.8 * len(samples))
-    samples_train, samples_test = np.split(samples, [train_n])
-    labels_train, labels_test = np.split(labels, [train_n])
-
-    raw_images_train, raw_image_test = np.split(raw_images, [train_n])
-
-    timer.stop()
-
-    # timer.start("training SVM with class weights...")
-    # model = SVM(C=100, gamma=1, class_weights=np.array([0.1, 1.0]))
-    # model.train(samples_train, labels_train)
-    # timer.stop()
-
-    timer.start("training SVM with balanced samples...")
-    model = SVM(C=10, gamma=6)
-    model.train(balanced_samples, balanced_labels)
-    timer.stop()
-
-    # timer.start("training LogisticRegression model...")
-    # model = LogisticRegression()
-    # model.train(balanced_samples, balanced_labels)
-    # timer.stop()
-
-    timer.start("evaluate model...")
-    confusion_matrix, score_metrics, indices = evaluate_model(model, samples, labels)
-    print_model_evaluation(confusion_matrix, score_metrics)
-    timer.stop()
-
-    print len(indices)
-    for i in range(1, 101):
-        plt.subplot(20, 20, 4*i-3)
-        plt.imshow(raw_images[indices[i]], interpolation="nearest")
-        plt.axis("off")
-    for i in range(1, 101):
-        plt.subplot(20, 20, 4*i-2)
-        plt.imshow(images_1[indices[i]], interpolation="nearest")
-        plt.axis("off")
-    for i in range(1, 101):
-        plt.subplot(20, 20, 4*i-1)
-        plt.imshow(images_2[indices[i]], interpolation="nearest")
-        plt.axis("off")
-    for i in range(1, 101):
-        plt.subplot(20, 20, 4*i)
-        plt.imshow(images_3[indices[i]], interpolation="nearest")
-        plt.axis("off")
-    plt.show()
-
-    # timer.start("sweeping parameters...")
-    # C_range = np.logspace(-3, 5, 9)
-    # gamma_range = np.logspace(-3, 3, 7)
-    # classifiers = []
-    # for C in C_range:
-    #     for gamma in gamma_range:
-    #         # train with balanced data
-    #         clf = SVM(C=C, gamma=gamma)
-    #         clf.train(balanced_samples, balanced_labels)
-    #
-    #         # train with skewed data
-    #         # clf = SVM(C=C, gamma=gamma, class_weights=np.array([0.1, 1.0]))
-    #         # clf.train(samples_train, labels_train)
-    #
-    #         classifiers.append((C, gamma, clf))
-    #
-    # criteria = ["precision", "accuracy", "f1"]
-    # scores = {criterion: [] for criterion in criteria}
-    # cm_list = []
-    # sm_list = []
-    # for clf in classifiers:
-    #     confusion_matrix, score_metrics, _ = evaluate_model(clf[2], samples_test, labels_test)
-    #     cm_list.append(confusion_matrix)
-    #     sm_list.append(score_metrics)
-    #     for criterion in criteria:
-    #         scores[criterion].append(score_metrics[criterion])
-    # timer.stop()
-    #
-    # max_index = scores[criteria[0]].index(max(scores[criteria[0]]))
-    # C_index = max_index / len(gamma_range)
-    # gamma_index = max_index % len(gamma_range)
-    # print "the best parameters by %s: C=%f gamma=%f" % (criteria[0], C_range[C_index], gamma_range[gamma_index])
-    # print_model_evaluation(cm_list[max_index], sm_list[max_index])
-    #
-    # # draw color map
-    # for criterion in criteria:
-    #     scores_by_criterion = np.array(scores[criterion]).reshape(len(C_range), len(gamma_range))
-    #     plt.figure(figsize=(8, 6))
-    #     plt.subplots_adjust(left=.2, right=0.95, bottom=0.15, top=0.95)
-    #     plt.imshow(scores_by_criterion, interpolation="nearest", cmap=plt.cool(),
-    #                norm=MidpointNormalize(vmin=0.5, midpoint=0.92))
-    #     plt.xlabel("gamma")
-    #     plt.ylabel("C")
-    #     plt.colorbar()
-    #     plt.xticks(np.arange(len(gamma_range)), gamma_range, rotation=45)
-    #     plt.yticks(np.arange(len(C_range)), C_range)
-    #     plt.title("Validation " + criterion)
-    #     plt.savefig(criterion + ".png")
-    #
-    # plt.show()
+def print_cm(cm, labels, hide_zeroes=False, hide_diagonal=False, hide_threshold=None):
+    """pretty print for confusion matrix"""
+    column_width = max([len(x) for x in labels] + [5])  # 5 is value length
+    empty_cell = " " * column_width
+    # Print header
+    print "    " + empty_cell,
+    for label in labels:
+        print "%{0}s".format(column_width) % label,
+    print
+    # Print rows
+    for i, label in enumerate(labels):
+        print "    %{0}s".format(column_width) % label,
+        for j in range(len(labels)):
+            cell = "%{0}.1f".format(column_width) % cm[i, j]
+            if hide_zeroes:
+                cell = cell if float(cm[i, j]) != 0 else empty_cell
+            if hide_diagonal:
+                cell = cell if i != j else empty_cell
+            if hide_threshold:
+                cell = cell if cm[i, j] > hide_threshold else empty_cell
+            print cell,
+        print
 
 
-if __name__ == "__main__":
-    main()
+def get_split_indices(labels, n_triangles, n_non_triangles):
+    triangle_indices = []
+    non_triangle_indices = []
+
+    triangle_label = 1
+    for i, item in enumerate(labels):
+        if item == triangle_label:
+            triangle_indices.append(i)
+        else:
+            non_triangle_indices.append(i)
+
+    random.shuffle(triangle_indices)
+    random.shuffle(non_triangle_indices)
+
+    triangle_train_indices = triangle_indices[:n_triangles]
+    triangle_test_indices = triangle_indices[n_triangles:]
+    non_triangle_train_indices = non_triangle_indices[:n_non_triangles]
+    non_triangle_test_indices = non_triangle_indices[n_non_triangles:]
+
+    train_indices = triangle_train_indices + non_triangle_train_indices
+    test_indices = triangle_test_indices + non_triangle_test_indices
+
+    random.shuffle(train_indices)
+    random.shuffle(test_indices)
+
+    return train_indices, test_indices
