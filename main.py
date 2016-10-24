@@ -58,8 +58,8 @@ def main(args):
     timer.start("[INFO] loading data...")
     images, labels = load_data()
 
-    n_triangles_train = 2000
-    n_non_triangles_train = 20000
+    n_triangles_train = 5000
+    n_non_triangles_train = 50000
     train_indices, test_indices = get_split_indices(labels, n_triangles_train, n_non_triangles_train)
 
     train_images, train_labels = images[train_indices], labels[train_indices]
@@ -87,14 +87,14 @@ def main(args):
         # print("[INFO] accuracy: {:.2f}%".format(accuracy * 100))
         # timer.stop()
 
+    timer.start("[INFO] evaluating...")
+    evaluate_lenet(model, test_images, test_labels)
+    timer.stop()
+
     if args["save_model"] > 0:
         timer.start("[INFO] dumping weights to file...")
         model.save_weights(args["weights"], overwrite=True)
         timer.stop()
-
-    timer.start("[INFO] evaluating...")
-    evaluate_lenet(model, test_images, test_labels)
-    timer.stop()
 
 
 if __name__ == "__main__":
@@ -107,4 +107,4 @@ if __name__ == "__main__":
     ap.add_argument("-w", "--weights", type=str,
                     help="(optional) path to weights file")
     # main(vars(ap.parse_args()))
-    main(vars(ap.parse_args(["--save-model", "1", "--weights", "output/lenet_weights.hdf5"])))
+    main(vars(ap.parse_args(["--load-model", "1", "--weights", "output/lenet_weights_5000_50000.hdf5"])))

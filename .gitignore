@@ -147,3 +147,5 @@ ENV/
 
 # Rope project settings
 .ropeproject
+images.dat
+output/
